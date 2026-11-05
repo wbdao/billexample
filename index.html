@@ -469,6 +469,18 @@ function isDataRow(r) {
   return true;
 }
 
+/* قراءة قيمة رقمية اختيارية: ترجع null إذا كانت الخلية فارغة أو رمزًا غير رقمي مثل "-" أو "#N/A" */
+function parseNumOrNull(raw) {
+  const s = String(raw === null || raw === undefined ? '' : raw).trim();
+  if (!s) return null;
+  const latin = toLatinDigits(s);
+  // لا يوجد أي رقم في الخلية (مثل "-" أو "—" أو "#N/A")
+  if (!/[0-9]/.test(latin)) return null;
+  // أخطاء الشيت مثل #DIV/0! أو #REF!
+  if (s.includes('#')) return null;
+  return round2(parseNum(s));
+}
+
 /* أرقام السطر: Amount هو الإجمالي النهائي بعد الخصومات، و«صافي السعر» للعرض فقط */
 function rowNumbers(r) {
   const qty = parseNum(field(r, 'Quantity'));
@@ -476,8 +488,7 @@ function rowNumbers(r) {
   const amountRaw = field(r, 'Amount');
   const amount = round2(amountRaw === '' ? qty * unitPrice : parseNum(amountRaw));
   const disc = discountOf(r);
-  const netRaw = field(r, 'صافي السعر', 'الصافي');
-  const netPrice = netRaw === '' ? null : round2(parseNum(netRaw));
+  const netPrice = parseNumOrNull(field(r, 'صافي السعر', 'الصافي'));
   return {
     qty,
     unitPrice,
