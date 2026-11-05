@@ -13,7 +13,6 @@
   }
   body { background:var(--bg); color:var(--text); min-height:100vh; }
 
-  /* ===== Header ===== */
   header {
     background:linear-gradient(135deg, var(--primary), var(--primary-dark));
     color:#fff; padding:0 24px; display:flex; align-items:center;
@@ -34,7 +33,6 @@
   .page.active { display:block; animation:fadeIn .3s; }
   @keyframes fadeIn { from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:none} }
 
-  /* ===== Cards / Buttons ===== */
   .card { background:var(--card); border-radius:12px; padding:24px; box-shadow:0 1px 4px rgba(0,0,0,.08); margin-bottom:20px; }
   .card h2 { font-size:18px; margin-bottom:16px; color:var(--primary-dark); border-bottom:2px solid var(--border); padding-bottom:10px; }
   label { display:block; font-weight:600; margin-bottom:6px; font-size:14px; }
@@ -55,7 +53,6 @@
   .status.ok { display:block; background:#dcfce7; color:#166534; border:1px solid #86efac; }
   .status.err { display:block; background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; }
 
-  /* ===== Toolbar ===== */
   .toolbar { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:20px; }
   .toolbar input { flex:1; min-width:220px; }
   .toolbar select { padding:11px 14px; border:1.5px solid var(--border); border-radius:8px; font-size:14px; background:#fff; }
@@ -67,7 +64,6 @@
   .stat .num { font-size:26px; font-weight:800; color:var(--primary); }
   .stat .lbl { font-size:13px; color:var(--muted); margin-top:4px; }
 
-  /* ===== Invoice ===== */
   .invoice {
     background:var(--card); border-radius:12px; box-shadow:0 1px 5px rgba(0,0,0,.1);
     margin-bottom:22px; overflow:hidden;
@@ -94,9 +90,7 @@
   table.items td { padding:9px 8px; text-align:center; border-bottom:1px solid var(--border); }
   table.items tr:nth-child(even) td { background:#f8fafc; }
   table.items tr:hover td { background:#eff6ff; }
-  .inv-total {
-    margin-top:14px; display:flex; justify-content:flex-start; gap:10px; flex-wrap:wrap;
-  }
+  .inv-total { margin-top:14px; display:flex; justify-content:flex-start; gap:10px; flex-wrap:wrap; }
   .total-badge {
     background:#eef2f7; border:1px solid var(--border); border-radius:8px;
     padding:10px 18px; font-size:14px;
@@ -140,7 +134,7 @@
 
 <div class="container">
 
-  <!-- ================= صفحة الفواتير ================= -->
+  <!-- صفحة الفواتير -->
   <div id="page-invoices" class="page active">
     <div class="stats" id="statsBar" style="display:none">
       <div class="stat"><div class="num" id="statInvoices">0</div><div class="lbl">عدد الفواتير</div></div>
@@ -168,7 +162,7 @@
     </div>
   </div>
 
-  <!-- ================= صفحة الإعدادات ================= -->
+  <!-- صفحة الإعدادات -->
   <div id="page-settings" class="page">
     <div class="card">
       <h2>⚙️ إعدادات الاتصال بجوجل شيت</h2>
@@ -191,8 +185,84 @@
 
 <script>
 /* ============ الحالة العامة ============ */
-let allRows = [];        // كل صفوف الشيت
-let invoices = [];       // الفواتير المجمعة
+let allRows = [];
+let invoices = [];
+
+/* ============ دالة parseNum الشاملة ============ */
+function parseNum(str) {
+  if (str === null || str === undefined) return 0;
+  let s = String(str).trim();
+  if (!s) return 0;
+
+  // تحويل الأرقام العربية ٠١٢٤٥٦٨٩ → 0123456789
+  s = s.replace(/[٠-٩]/g, d => '٠١٢٤٥٦٨٩'.indexOf(d));
+  // تحويل الأرقام الفارسية ۰۲۳۴۶۷۸ → 0123456789
+  s = s.replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d));
+
+  // أقواس = سالب: (1234) → -1234
+  let negative = false;
+  if (/^\(.*\)$/.test(s)) {
+    negative = true;
+    s = s.replace(/[()]/g, '');
+  }
+
+  // إزالة نسبة المئوية
+  s = s.replace(/%/g, '');
+
+  // إزالة رموز العملات
+  s = s.replace(/[$€£¥₪₿₽₿]/g, '');
+  s = s.replace(/\b(SAR|EGP|USD|EUR|AED|KWD|BHD|OMR|QAR|JOD|IQD|LYD|TND|DZD|MAD|YER|SYP|LBP|GBP|CAD|AUD|JPY|CNY|INR|THB|MYR|SGD|PHP|IDR|VND|KRW|BRL|MXN|CLP|COP|ARS|PEN|UYU|PYG|BOB|VEF|CRC|GTQ|HNL|BZD|TOP|TTD|GYD|JMD|BSD|HTG|DOP|CUP|NIO|SVY|HND|GTM|SLP|AFN|AMD|AZN|BYR|BYN|BGN|BIF|BTN|BDT|BBD|BZD|BMD|BMD|BMD)\b/gi, '');
+
+  // إزالة رموز العملات العربية
+  s = s.replace(/(ر\.س|د\.إ|ج\.م|د\.ك|د\.أ|د\.ب|د\.ع|د\.ل|د\.م|د\.س|د\.ي|د\.ر|د\.ت|د\.ج|د\.غ|د\.ف|د\.ح|د\.ط|د\.ظ|د\.ذ|د\.ث|د\.ق|د\.ص|د\.ض|ريال|درهم|دينار|جنيه|ليرة|عملة|فلوس|هللة|فلس)/g, '');
+
+  // إزالة أي أحرف إنجليزية متبقية
+  s = s.replace(/[a-zA-Z]/g, '');
+
+  // إزالة أي مسافات متبقية
+  s = s.replace(/\s/g, '');
+
+  // إزالة أي رموز غير رقمية (نقطة، فاصلة، سالب فقط)
+  s = s.replace(/[^0-9.,-]/g, '');
+
+  if (!s || s === '-' || s === '.' || s === ',' || s === '-.' || s === '-,') return 0;
+
+  // التعامل مع فواصل الآلاف والعشرية
+  if (s.includes(',') && s.includes('.')) {
+    // 1,234.56 → 1234.56
+    s = s.replace(/,/g, '');
+  } else if (s.includes(',')) {
+    const parts = s.split(',');
+    if (parts.length === 2 && parts[1].length <= 2) {
+      // 1234,56 → 1234.56 (فاصلة عشرية)
+      s = s.replace(',', '.');
+    } else {
+      // 1,234,567 → 1234567 (فواصل آلاف)
+      s = s.replace(/,/g, '');
+    }
+  }
+
+  // إذا فيه أكثر من نقطة → النقاط الزائدة فواصل آلاف
+  const dotCount = (s.match(/\./g) || []).length;
+  if (dotCount > 1) {
+    const lastDot = s.lastIndexOf('.');
+    s = s.substring(0, lastDot).replace(/\./g, '') + s.substring(lastDot);
+  }
+
+  let n = parseFloat(s);
+  if (isNaN(n)) return 0;
+  if (negative) n = -n;
+  return n;
+}
+
+/* ============ تنسيق الأرقام للعرض ============ */
+function fmt(n) {
+  if (n === 0 || n === undefined || n === null) return '0';
+  return n.toLocaleString('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2
+  });
+}
 
 /* ============ التنقل بين الصفحات ============ */
 function showPage(name) {
@@ -203,7 +273,7 @@ function showPage(name) {
   if (name === 'invoices') loadInvoices();
 }
 
-/* ============ استخراج معرّف الشيت من الرابط ============ */
+/* ============ استخراج معرّف الشيت ============ */
 function extractSheetId(url) {
   const m = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
   return m ? m[1] : null;
@@ -252,7 +322,7 @@ async function fetchSheet(sheetId) {
   return parseCSV(text);
 }
 
-/* ============ محلل CSV يدعم علامات الاقتباس ============ */
+/* ============ محلل CSV ============ */
 function parseCSV(text) {
   const rows = [];
   let row = [], field = '', inQuotes = false;
@@ -306,11 +376,11 @@ function buildInvoices(rows) {
       });
     }
     const inv = map.get(key);
-    const qty = parseFloat(r['Quantity']) || 0;
-    const unitPrice = parseFloat(r['Unit price']) || 0;
-    const amount = parseFloat(r['Amount']) || (qty * unitPrice);
-    const discount = parseFloat(r['Discount']) || 0;
-    const net = parseFloat(r['صافي السعر']) || (amount - discount);
+    const qty = parseNum(r['Quantity']);
+    const unitPrice = parseNum(r['Unit price']);
+    const amount = parseNum(r['Amount']) || (qty * unitPrice);
+    const discount = parseNum(r['Discount']);
+    const net = parseNum(r['صافي السعر']) || (amount - discount);
     inv.items.push({
       item: r['Item'] || '-',
       name: r['Name'] || '-',
@@ -364,10 +434,6 @@ function updateStats() {
   document.getElementById('statItems').textContent = allRows.length;
   const total = invoices.reduce((s, i) => s + i.totalNet, 0);
   document.getElementById('statTotal').textContent = fmt(total);
-}
-
-function fmt(n) {
-  return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
 }
 
 function parseDate(s) {
