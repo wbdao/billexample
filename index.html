@@ -139,8 +139,12 @@
     <div class="stats" id="statsBar" style="display:none">
       <div class="stat"><div class="num" id="statInvoices">0</div><div class="lbl">عدد الفواتير</div></div>
       <div class="stat"><div class="num" id="statItems">0</div><div class="lbl">عدد الأصناف</div></div>
-      <div class="stat"><div class="num" id="statTotal">0</div><div class="lbl">إجمالي المبيعات</div></div>
+      <div class="stat"><div class="num" id="statGross">0</div><div class="lbl">إجمالي المبالغ</div></div>
+      <div class="stat"><div class="num" id="statDiscount">0</div><div class="lbl">إجمالي الخصم</div></div>
+      <div class="stat"><div class="num" id="statTotal">0</div><div class="lbl">الصافي</div></div>
     </div>
+
+    <div id="diagPanel" style="display:none"></div>
 
     <div class="toolbar" id="toolbar" style="display:none">
       <input type="text" id="searchBox" placeholder="🔍 بحث برقم الفاتورة / العميل / الصنف..." oninput="renderInvoices()">
@@ -150,6 +154,7 @@
         <option value="amountDesc">الأعلى قيمة أولاً</option>
       </select>
       <button class="btn secondary" onclick="loadInvoices()">🔄 تحديث</button>
+      <button class="btn secondary" onclick="toggleDiag()">🔍 مراجعة الإجماليات</button>
       <button class="btn secondary" onclick="window.print()">🖨️ طباعة</button>
     </div>
 
@@ -171,8 +176,18 @@
       <div class="hint">
         ⚠️ ملاحظات مهمة:<br>
         1. تأكد أن الشيت منشور بصلاحية: <b>أي شخص لديه الرابط يمكنه العرض</b> (Share → Anyone with the link → Viewer).<br>
-        2. الصف الأول يجب أن يحتوي على أسماء الأعمدة كما هي: Sales order, Customer account, Delivery name, Warehouse, Group, Date, Invoice, Voucher, Item, Name, Size, Color, Unit price, Quantity, Amount, Unit, Discount, Discount percent, Item group, العبوة, صافي السعر.
+        2. الصف الأول يجب أن يحتوي على أسماء الأعمدة كما هي: Sales order, Customer account, Delivery name, Warehouse, Group, Date, Invoice, Voucher, Item, Name, Size, Color, Unit price, Quantity, Amount, Unit, Discount, Discount percent, Item group, العبوة, صافي السعر.<br>
+        3. إذا كان رابط الشيت ينتهي بـ <b>#gid=...</b> فسيتم قراءة نفس التبويب تلقائيًا.
       </div>
+      <label style="margin-top:16px">طريقة حساب صافي السطر</label>
+      <select id="netMode" style="width:100%;padding:11px 14px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:#fff">
+        <option value="auto">تلقائي (اكتشاف من البيانات)</option>
+        <option value="netColumn">قيمة عمود «صافي السعر» كما هي (إجمالي السطر)</option>
+        <option value="qtyTimesNet">الكمية × «صافي السعر» (سعر الوحدة الصافي)</option>
+        <option value="amountMinusDiscount">المبلغ − الخصم</option>
+        <option value="amountMinusPercent">المبلغ − (المبلغ × نسبة الخصم)</option>
+      </select>
+      <div class="hint">💡 إذا كان الإجمالي ما زال مختلفًا، اضغط «🔍 مراجعة الإجماليات» وقارن مجموع كل طريقة مع إجمالي الشيت.</div>
       <div style="margin-top:18px; display:flex; gap:10px; flex-wrap:wrap">
         <button class="btn" id="testBtn" onclick="testConnection()">🔌 اختبار الاتصال</button>
         <button class="btn secondary" id="saveBtn" onclick="saveSettings()">💾 حفظ</button>
@@ -188,16 +203,36 @@
 let allRows = [];
 let invoices = [];
 
+/* ============ أدوات الأرقام ============ */
+const AR_DIGITS = '٠١٢٣٤٥٦٧٨٩';
+const FA_DIGITS = '۰۱۲۳۴۵۶۷۸۹';
+
+function toLatinDigits(str) {
+  return String(str)
+    .replace(/[٠-٩]/g, d => String(AR_DIGITS.indexOf(d)))
+    .replace(/[۰-۹]/g, d => String(FA_DIGITS.indexOf(d)));
+}
+
+function round2(n) {
+  if (!isFinite(n)) return 0;
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
 /* ============ دالة parseNum الشاملة ============ */
 function parseNum(str) {
   if (str === null || str === undefined) return 0;
   let s = String(str).trim();
   if (!s) return 0;
 
-  // تحويل الأرقام العربية ٠١٢٤٥٦٨٩ → 0123456789
-  s = s.replace(/[٠-٩]/g, d => '٠١٢٤٥٦٨٩'.indexOf(d));
-  // تحويل الأرقام الفارسية ۰۲۳۴۶۷۸ → 0123456789
-  s = s.replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d));
+  // تحويل الأرقام العربية/الفارسية → 0123456789
+  s = toLatinDigits(s);
+  // محارف الاتجاه والمسافات الخاصة
+  s = s.replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069\u00a0\u2007\u202f]/g, ' ');
+  // توحيد إشارة السالب
+  s = s.replace(/[−–—ـ]/g, '-');
+  // إزالة الفاصلة الآلاف العربية وتحويل العشرية العربية إلى نقطة
+  s = s.replace(/٬/g, '');
+  s = s.replace(/٫/g, '.');
 
   // أقواس = سالب: (1234) → -1234
   let negative = false;
@@ -207,7 +242,7 @@ function parseNum(str) {
   }
 
   // إزالة نسبة المئوية
-  s = s.replace(/%/g, '');
+  s = s.replace(/[%٪]/g, '');
 
   // إزالة رموز العملات
   s = s.replace(/[$€£¥₪₿₽₿]/g, '');
@@ -227,32 +262,57 @@ function parseNum(str) {
 
   if (!s || s === '-' || s === '.' || s === ',' || s === '-.' || s === '-,') return 0;
 
-  // التعامل مع فواصل الآلاف والعشرية
-  if (s.includes(',') && s.includes('.')) {
-    // 1,234.56 → 1234.56
-    s = s.replace(/,/g, '');
-  } else if (s.includes(',')) {
-    const parts = s.split(',');
-    if (parts.length === 2 && parts[1].length <= 2) {
-      // 1234,56 → 1234.56 (فاصلة عشرية)
-      s = s.replace(',', '.');
+  // التعامل مع فواصل الآلاف والعشرية (يحدد الفاصل العشري حسب موقعه)
+  const lastComma = s.lastIndexOf(',');
+  const lastDot = s.lastIndexOf('.');
+  if (lastComma !== -1 && lastDot !== -1) {
+    if (lastComma > lastDot) {
+      // 1.234,56 → 1234.56
+      s = s.replace(/\./g, '').replace(/,/g, '.');
     } else {
-      // 1,234,567 → 1234567 (فواصل آلاف)
+      // 1,234.56 → 1234.56
       s = s.replace(/,/g, '');
     }
-  }
-
-  // إذا فيه أكثر من نقطة → النقاط الزائدة فواصل آلاف
-  const dotCount = (s.match(/\./g) || []).length;
-  if (dotCount > 1) {
-    const lastDot = s.lastIndexOf('.');
-    s = s.substring(0, lastDot).replace(/\./g, '') + s.substring(lastDot);
+  } else if (lastComma !== -1) {
+    const parts = s.split(',');
+    const left = parts[0].replace(/[^\d]/g, '');
+    const right = (parts[1] || '').replace(/[^\d]/g, '');
+    if (parts.length > 2 || (right.length === 3 && left !== '' && left !== '0')) {
+      // 1,234,567 / 1,234 → فواصل آلاف
+      s = s.replace(/,/g, '');
+    } else {
+      // 1234,56 → 1234.56
+      s = s.replace(',', '.');
+    }
+  } else if ((s.match(/\./g) || []).length > 1) {
+    // 1.234.567 → فواصل آلاف، وإلا النقطة الأخيرة عشرية
+    const parts = s.split('.');
+    if (parts.slice(1).every(p => p.length === 3)) s = s.replace(/\./g, '');
+    else s = s.substring(0, lastDot).replace(/\./g, '') + s.substring(lastDot);
   }
 
   let n = parseFloat(s);
-  if (isNaN(n)) return 0;
-  if (negative) n = -n;
+  if (!isFinite(n)) return 0;
+  if (negative) n = -Math.abs(n);
   return n;
+}
+
+/* ============ تطبيع أسماء الأعمدة والوصول إليها ============ */
+function normKey(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/[\uFEFF\u200b]/g, '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function field(row, ...names) {
+  for (const name of names) {
+    const k = normKey(name);
+    if (Object.prototype.hasOwnProperty.call(row, k)) return row[k];
+  }
+  return '';
 }
 
 /* ============ تنسيق الأرقام للعرض ============ */
@@ -279,6 +339,11 @@ function extractSheetId(url) {
   return m ? m[1] : null;
 }
 
+function extractGid(url) {
+  const m = String(url || '').match(/[#&?]gid=(\d+)/);
+  return m ? m[1] : null;
+}
+
 /* ============ الإعدادات ============ */
 function saveSettings() {
   const url = document.getElementById('sheetUrl').value.trim();
@@ -287,6 +352,8 @@ function saveSettings() {
     return;
   }
   localStorage.setItem('sheetUrl', url);
+  const modeEl = document.getElementById('netMode');
+  if (modeEl) localStorage.setItem('netMode', modeEl.value);
   showStatus('✅ تم حفظ الإعدادات بنجاح.', true);
   loadInvoices();
 }
@@ -294,7 +361,7 @@ function saveSettings() {
 function showStatus(msg, ok) {
   const box = document.getElementById('statusBox');
   box.textContent = msg;
-  box.className = 'status ' + (ok ? 'ok' : 'err');
+  box.className = 'status ' + (ok === false ? 'err' : 'ok');
 }
 
 async function testConnection() {
@@ -304,7 +371,7 @@ async function testConnection() {
   document.getElementById('testBtn').disabled = true;
   showStatus('⏳ جارٍ الاتصال...');
   try {
-    const rows = await fetchSheet(id);
+    const rows = await fetchSheet(id, extractGid(url));
     if (!rows.length) throw new Error('الشيت فارغ');
     showStatus(`✅ الاتصال ناجح! تم العثور على ${rows.length} صف بيانات.`, true);
   } catch (e) {
@@ -314,8 +381,9 @@ async function testConnection() {
 }
 
 /* ============ جلب البيانات من جوجل شيت ============ */
-async function fetchSheet(sheetId) {
-  const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`;
+async function fetchSheet(sheetId, gid) {
+  let csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`;
+  if (gid) csvUrl += `&gid=${gid}`;
   const res = await fetch(csvUrl);
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const text = await res.text();
@@ -346,29 +414,121 @@ function parseCSV(text) {
   }
   if (field !== '' || row.length) { row.push(field); if (row.some(f => f.trim() !== '')) rows.push(row); }
   if (!rows.length) return [];
-  const headers = rows[0].map(h => h.trim());
+  const headers = rows[0].map(h => normKey(h));
   return rows.slice(1).map(r => {
     const obj = {};
-    headers.forEach((h, i) => obj[h] = (r[i] || '').trim());
+    headers.forEach((h, i) => {
+      if (!h || Object.prototype.hasOwnProperty.call(obj, h)) return;
+      obj[h] = (r[i] || '').trim();
+    });
     return obj;
   });
 }
 
 /* ============ تجميع الفواتير ============ */
-function buildInvoices(rows) {
-  const map = new Map();
+let diagnostics = null;
+
+function readNetMode() {
+  return localStorage.getItem('netMode') || 'auto';
+}
+
+/* استبعاد صفوف الرؤوس المكررة وصفوف الإجماليات والصفوف الفارغة */
+function isDataRow(r) {
+  const invoice = field(r, 'Invoice');
+  const salesOrder = field(r, 'Sales order');
+  const item = field(r, 'Item');
+  const name = field(r, 'Name');
+
+  if (!invoice && !salesOrder && !item && !name) return false;
+  if (normKey(item) === 'item' && normKey(name) === 'name') return false;
+
+  const label = normKey(item + ' ' + name);
+  if (!invoice && !salesOrder &&
+      /^(الإجمالي|اجمالي|المجموع|مجموع|total|grand total|sum)/.test(label)) return false;
+
+  return true;
+}
+
+/* اكتشاف تلقائي: هل «صافي السعر» سعر وحدة أم إجمالي سطر؟ */
+function detectNetMode(rows) {
+  let perUnit = 0, line = 0;
   rows.forEach(r => {
-    const key = r['Invoice'] || r['Sales order'] || 'بدون رقم';
+    const qty = parseNum(field(r, 'Quantity'));
+    if (qty === 0 || qty === 1) return;
+    const netRaw = field(r, 'صافي السعر');
+    if (netRaw === '') return;
+    const net = parseNum(netRaw);
+    const amountRaw = field(r, 'Amount');
+    const amount = amountRaw === '' ? qty * parseNum(field(r, 'Unit price')) : parseNum(amountRaw);
+    const lineNet = amount - parseNum(field(r, 'Discount'));
+    if (!net || !lineNet) return;
+    // نقارن القيمة بأقرب تفسير: سعر وحدة أم إجمالي سطر
+    const dPerUnit = Math.abs(net - lineNet / qty);
+    const dLine = Math.abs(net - lineNet);
+    if (dPerUnit < dLine) perUnit++;
+    else if (dLine < dPerUnit) line++;
+  });
+  if (perUnit > line) return 'qtyTimesNet';
+  if (line > 0) return 'netColumn';
+  return 'amountMinusDiscount';
+}
+
+/* حساب أرقام السطر حسب الطريقة المختارة (بدون استخدام || حتى لا تُفقد القيم الصفرية) */
+function rowNumbers(r, netMode) {
+  const qty = parseNum(field(r, 'Quantity'));
+  const unitPrice = parseNum(field(r, 'Unit price'));
+  const amountRaw = field(r, 'Amount');
+  const amount = round2(amountRaw === '' ? qty * unitPrice : parseNum(amountRaw));
+  const discount = round2(parseNum(field(r, 'Discount')));
+  const discountPct = parseNum(field(r, 'Discount percent', 'Discount %', 'نسبة الخصم'));
+  const netRaw = field(r, 'صافي السعر', 'الصافي');
+  const netCol = netRaw === '' ? null : round2(parseNum(netRaw));
+  const afterDiscount = round2(amount - discount);
+
+  let net;
+  switch (netMode) {
+    case 'qtyTimesNet':
+      net = netCol !== null ? round2(qty * netCol) : afterDiscount;
+      break;
+    case 'amountMinusPercent':
+      net = round2(amount - (amount * discountPct / 100));
+      break;
+    case 'amountMinusDiscount':
+      net = afterDiscount;
+      break;
+    case 'netColumn':
+    default:
+      net = netCol !== null ? netCol : afterDiscount;
+  }
+  return { qty, unitPrice, amount, discount, discountPct, netCol, net };
+}
+
+function buildInvoices(rows) {
+  const dataRows = rows.filter(isDataRow);
+  const setting = readNetMode();
+  const mode = setting === 'auto' ? detectNetMode(dataRows) : setting;
+  const map = new Map();
+  const diag = {
+    mode,
+    totalRows: rows.length,
+    dataRows: dataRows.length,
+    skipped: rows.length - dataRows.length,
+    amount: 0, discount: 0, net: 0,
+    netColRaw: 0, qtyTimesNet: 0, amountMinusDiscount: 0
+  };
+
+  dataRows.forEach(r => {
+    const key = field(r, 'Invoice') || field(r, 'Sales order') || 'بدون رقم';
     if (!map.has(key)) {
       map.set(key, {
         invoice: key,
-        salesOrder: r['Sales order'] || '-',
-        customer: r['Customer account'] || '-',
-        deliveryName: r['Delivery name'] || '-',
-        warehouse: r['Warehouse'] || '-',
-        group: r['Group'] || '-',
-        date: r['Date'] || '',
-        voucher: r['Voucher'] || '-',
+        salesOrder: field(r, 'Sales order') || '-',
+        customer: field(r, 'Customer account') || '-',
+        deliveryName: field(r, 'Delivery name') || '-',
+        warehouse: field(r, 'Warehouse') || '-',
+        group: field(r, 'Group') || '-',
+        date: field(r, 'Date') || '',
+        voucher: field(r, 'Voucher') || '-',
         items: [],
         totalAmount: 0,
         totalDiscount: 0,
@@ -376,29 +536,39 @@ function buildInvoices(rows) {
       });
     }
     const inv = map.get(key);
-    const qty = parseNum(r['Quantity']);
-    const unitPrice = parseNum(r['Unit price']);
-    const amount = parseNum(r['Amount']) || (qty * unitPrice);
-    const discount = parseNum(r['Discount']);
-    const net = parseNum(r['صافي السعر']) || (amount - discount);
+    const n = rowNumbers(r, mode);
+    const afterDiscount = round2(n.amount - n.discount);
+
     inv.items.push({
-      item: r['Item'] || '-',
-      name: r['Name'] || '-',
-      size: r['Size'] || '-',
-      color: r['Color'] || '-',
-      unit: r['Unit'] || '-',
-      qty: qty,
-      unitPrice: unitPrice,
-      amount: amount,
-      discount: discount,
-      net: net,
-      package: r['العبوة'] || '-',
-      itemGroup: r['Item group'] || '-'
+      item: field(r, 'Item') || '-',
+      name: field(r, 'Name') || '-',
+      size: field(r, 'Size') || '-',
+      color: field(r, 'Color') || '-',
+      unit: field(r, 'Unit') || '-',
+      qty: n.qty,
+      unitPrice: n.unitPrice,
+      amount: n.amount,
+      discount: n.discount,
+      net: n.net,
+      package: field(r, 'العبوة') || '-',
+      itemGroup: field(r, 'Item group') || '-'
     });
-    inv.totalAmount += amount;
-    inv.totalDiscount += discount;
-    inv.totalNet += net;
+    inv.totalAmount += n.amount;
+    inv.totalDiscount += n.discount;
+    inv.totalNet += n.net;
+
+    diag.amount += n.amount;
+    diag.discount += n.discount;
+    diag.net += n.net;
+    if (n.netCol !== null) diag.netColRaw += n.netCol;
+    diag.qtyTimesNet += n.netCol !== null ? n.qty * n.netCol : afterDiscount;
+    diag.amountMinusDiscount += afterDiscount;
   });
+
+  Object.keys(diag).forEach(k => {
+    if (typeof diag[k] === 'number') diag[k] = round2(diag[k]);
+  });
+  diagnostics = diag;
   return [...map.values()];
 }
 
@@ -415,7 +585,7 @@ async function loadInvoices() {
   document.getElementById('toolbar').style.display = 'none';
 
   try {
-    allRows = await fetchSheet(id);
+    allRows = await fetchSheet(id, extractGid(url));
     if (!allRows.length) throw new Error('الشيت لا يحتوي على بيانات');
     invoices = buildInvoices(allRows);
     document.getElementById('statsBar').style.display = 'flex';
@@ -429,17 +599,71 @@ async function loadInvoices() {
   }
 }
 
+const NET_MODE_LABELS = {
+  auto: 'تلقائي (اكتشاف من البيانات)',
+  netColumn: 'قيمة عمود «صافي السعر» كما هي',
+  qtyTimesNet: 'الكمية × «صافي السعر»',
+  amountMinusDiscount: 'المبلغ − الخصم',
+  amountMinusPercent: 'المبلغ − (المبلغ × نسبة الخصم)'
+};
+
 function updateStats() {
   document.getElementById('statInvoices').textContent = invoices.length;
-  document.getElementById('statItems').textContent = allRows.length;
-  const total = invoices.reduce((s, i) => s + i.totalNet, 0);
-  document.getElementById('statTotal').textContent = fmt(total);
+  const itemCount = invoices.reduce((s, i) => s + i.items.length, 0);
+  document.getElementById('statItems').textContent = itemCount;
+  const gross = round2(invoices.reduce((s, i) => s + i.totalAmount, 0));
+  const discount = round2(invoices.reduce((s, i) => s + i.totalDiscount, 0));
+  const net = round2(invoices.reduce((s, i) => s + i.totalNet, 0));
+  document.getElementById('statGross').textContent = fmt(gross);
+  document.getElementById('statDiscount').textContent = fmt(discount);
+  document.getElementById('statTotal').textContent = fmt(net);
 }
 
 function parseDate(s) {
   if (!s) return new Date(0);
-  const d = new Date(s);
+  const normalized = toLatinDigits(String(s)).replace(/[\u200e\u200f]/g, '').trim();
+  const d = new Date(normalized);
   return isNaN(d) ? new Date(0) : d;
+}
+
+/* ============ لوحة مراجعة الإجماليات ============ */
+function toggleDiag() {
+  const panel = document.getElementById('diagPanel');
+  if (panel.style.display === 'none') {
+    renderDiag();
+    panel.style.display = 'block';
+  } else {
+    panel.style.display = 'none';
+  }
+}
+
+function renderDiag() {
+  const panel = document.getElementById('diagPanel');
+  if (!diagnostics) {
+    panel.innerHTML = '<div class="card"><h2>🔍 مراجعة الإجماليات</h2><div class="empty">لا توجد بيانات بعد</div></div>';
+    return;
+  }
+  const d = diagnostics;
+  panel.innerHTML = `
+    <div class="card">
+      <h2>🔍 مراجعة الإجماليات</h2>
+      <div class="hint" style="margin:0 0 14px">
+        الصفوف في الشيت: <b>${d.totalRows}</b> — صفوف بيانات مستخدمة: <b>${d.dataRows}</b> — صفوف متجاهلة (رؤوس/إجماليات/فارغة): <b>${d.skipped}</b><br>
+        الطريقة المستخدمة في حساب الصافي: <b>${NET_MODE_LABELS[d.mode] || d.mode}</b>
+      </div>
+      <table class="items" style="margin-top:0">
+        <thead><tr><th>طريقة الحساب</th><th>الإجمالي</th></tr></thead>
+        <tbody>
+          <tr><td>مجموع Amount (المبلغ قبل الخصم)</td><td>${fmt(d.amount)}</td></tr>
+          <tr><td>مجموع Discount (الخصم)</td><td>${fmt(d.discount)}</td></tr>
+          <tr><td>مجموع Amount − Discount</td><td>${fmt(d.amountMinusDiscount)}</td></tr>
+          <tr><td>مجموع عمود «صافي السعر» كما هو</td><td>${fmt(d.netColRaw)}</td></tr>
+          <tr><td>مجموع Quantity × «صافي السعر»</td><td>${fmt(d.qtyTimesNet)}</td></tr>
+          <tr><td><b>الصافي المستخدم حاليًا</b></td><td><b>${fmt(d.net)}</b></td></tr>
+        </tbody>
+      </table>
+      <div class="hint">قارن الرقم المطابق لإجمالي الشيت واختر نفس الطريقة من الإعدادات. إذا لم يطابق أي رقم، فقد توجد صفوف إجماليات إضافية أو خلايا غير رقمية أو تبويب مختلف.</div>
+    </div>`;
 }
 
 function renderInvoices() {
@@ -524,6 +748,8 @@ function esc(s) {
 /* ============ التهيئة ============ */
 window.addEventListener('DOMContentLoaded', () => {
   const saved = localStorage.getItem('sheetUrl');
+  const savedMode = localStorage.getItem('netMode');
+  if (savedMode) document.getElementById('netMode').value = savedMode;
   if (saved) {
     document.getElementById('sheetUrl').value = saved;
     loadInvoices();
