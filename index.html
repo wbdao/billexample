@@ -162,9 +162,7 @@
     <div class="stats" id="statsBar" style="display:none">
       <div class="stat"><div class="num" id="statInvoices">0</div><div class="lbl">عدد الفواتير</div></div>
       <div class="stat"><div class="num" id="statItems">0</div><div class="lbl">عدد الأصناف</div></div>
-      <div class="stat"><div class="num" id="statGross">0</div><div class="lbl">إجمالي المبالغ</div></div>
-      <div class="stat"><div class="num" id="statDiscount">0</div><div class="lbl">إجمالي الخصم</div></div>
-      <div class="stat"><div class="num" id="statTotal">0</div><div class="lbl">الصافي</div></div>
+      <div class="stat"><div class="num" id="statTotal">0</div><div class="lbl">الإجمالي</div></div>
     </div>
 
     <div id="diagPanel" style="display:none"></div>
@@ -206,15 +204,9 @@
         2. الصف الأول يجب أن يحتوي على أسماء الأعمدة كما هي: Sales order, Customer account, Delivery name, Warehouse, Group, Date, Invoice, Voucher, Item, Name, Size, Color, Unit price, Quantity, Amount, Unit, Discount, Discount percent, Item group, العبوة, صافي السعر.<br>
         3. إذا كان رابط الشيت ينتهي بـ <b>#gid=...</b> فسيتم قراءة نفس التبويب تلقائيًا.
       </div>
-      <label style="margin-top:16px">طريقة حساب صافي السطر</label>
-      <select id="netMode" style="width:100%;padding:11px 14px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:#fff">
-        <option value="auto">تلقائي (اكتشاف من البيانات)</option>
-        <option value="netColumn">قيمة عمود «صافي السعر» كما هي (إجمالي السطر)</option>
-        <option value="qtyTimesNet">الكمية × «صافي السعر» (سعر الوحدة الصافي)</option>
-        <option value="amountMinusDiscount">المبلغ − الخصم</option>
-        <option value="amountMinusPercent">المبلغ − (المبلغ × نسبة الخصم)</option>
-      </select>
-      <div class="hint">💡 عمود <b>Discount</b> = مبلغ الخصم، وعمود <b>Discount percent</b> = نسبة الخصم (15 تعني 15%). إذا كان الإجمالي مختلفًا، اضغط «🔍 مراجعة الإجماليات» وقارن مجموع كل طريقة مع إجمالي الشيت.</div>
+      <div class="hint">
+        💡 <b>Amount</b> هو إجمالي السطر النهائي بعد الخصومات، وعمود <b>صافي السعر</b> يُعرض للمراجعة فقط ولا يُخصم مرة أخرى. عمود <b>Discount</b> = مبلغ الخصم، وعمود <b>Discount percent</b> = نسبة الخصم (15 تعني 15%). إذا كان الإجمالي مختلفًا، اضغط «🔍 مراجعة الإجماليات» في صفحة الفواتير.
+      </div>
       <div style="margin-top:18px; display:flex; gap:10px; flex-wrap:wrap">
         <button class="btn" id="testBtn" onclick="testConnection()">🔌 اختبار الاتصال</button>
         <button class="btn secondary" id="saveBtn" onclick="saveSettings()">💾 حفظ</button>
@@ -379,8 +371,6 @@ function saveSettings() {
     return;
   }
   localStorage.setItem('sheetUrl', url);
-  const modeEl = document.getElementById('netMode');
-  if (modeEl) localStorage.setItem('netMode', modeEl.value);
   showStatus('✅ تم حفظ الإعدادات بنجاح.', true);
   loadInvoices();
 }
@@ -455,10 +445,6 @@ function parseCSV(text) {
 /* ============ تجميع الفواتير ============ */
 let diagnostics = null;
 
-function readNetMode() {
-  return localStorage.getItem('netMode') || 'auto';
-}
-
 /* الخصم: Discount = مبلغ الخصم، Discount percent = نسبة مئوية (15 = 15%) */
 function discountOf(amount, row) {
   const pct = round2(parseNum(field(row, 'Discount percent', 'Discount %', 'نسبة الخصم')));
@@ -485,73 +471,36 @@ function isDataRow(r) {
   return true;
 }
 
-/* اكتشاف تلقائي: هل «صافي السعر» سعر وحدة أم إجمالي سطر؟ */
-function detectNetMode(rows) {
-  let perUnit = 0, line = 0;
-  rows.forEach(r => {
-    const qty = parseNum(field(r, 'Quantity'));
-    if (qty === 0 || qty === 1) return;
-    const netRaw = field(r, 'صافي السعر');
-    if (netRaw === '') return;
-    const net = parseNum(netRaw);
-    const amountRaw = field(r, 'Amount');
-    const amount = amountRaw === '' ? qty * parseNum(field(r, 'Unit price')) : parseNum(amountRaw);
-    const lineNet = amount - discountOf(amount, r).value;
-    if (!net || !lineNet) return;
-    // نقارن القيمة بأقرب تفسير: سعر وحدة أم إجمالي سطر
-    const dPerUnit = Math.abs(net - lineNet / qty);
-    const dLine = Math.abs(net - lineNet);
-    if (dPerUnit < dLine) perUnit++;
-    else if (dLine < dPerUnit) line++;
-  });
-  if (perUnit > line) return 'qtyTimesNet';
-  if (line > 0) return 'netColumn';
-  return 'amountMinusDiscount';
-}
-
-/* حساب أرقام السطر حسب الطريقة المختارة (بدون استخدام || حتى لا تُفقد القيم الصفرية) */
-function rowNumbers(r, netMode) {
+/* أرقام السطر: Amount هو الإجمالي النهائي بعد الخصومات، و«صافي السعر» للعرض فقط */
+function rowNumbers(r) {
   const qty = parseNum(field(r, 'Quantity'));
   const unitPrice = parseNum(field(r, 'Unit price'));
   const amountRaw = field(r, 'Amount');
   const amount = round2(amountRaw === '' ? qty * unitPrice : parseNum(amountRaw));
   const disc = discountOf(amount, r);
-  const discount = disc.value;
-  const discountPct = disc.pct;
   const netRaw = field(r, 'صافي السعر', 'الصافي');
-  const netCol = netRaw === '' ? null : round2(parseNum(netRaw));
-  const afterDiscount = round2(amount - discount);
-
-  let net;
-  switch (netMode) {
-    case 'qtyTimesNet':
-      net = netCol !== null ? round2(qty * netCol) : afterDiscount;
-      break;
-    case 'amountMinusPercent':
-      net = round2(amount - (amount * discountPct / 100));
-      break;
-    case 'amountMinusDiscount':
-      net = afterDiscount;
-      break;
-    case 'netColumn':
-    default:
-      net = netCol !== null ? netCol : afterDiscount;
-  }
-  return { qty, unitPrice, amount, discount, discountPct, netCol, net };
+  const netPrice = netRaw === '' ? null : round2(parseNum(netRaw));
+  return {
+    qty,
+    unitPrice,
+    amount,
+    discount: disc.value,
+    discountPct: disc.pct,
+    netPrice
+  };
 }
 
 function buildInvoices(rows) {
   const dataRows = rows.filter(isDataRow);
-  const setting = readNetMode();
-  const mode = setting === 'auto' ? detectNetMode(dataRows) : setting;
   const map = new Map();
   const diag = {
-    mode,
     totalRows: rows.length,
     dataRows: dataRows.length,
     skipped: rows.length - dataRows.length,
-    amount: 0, discount: 0, net: 0,
-    netColRaw: 0, qtyTimesNet: 0, amountMinusDiscount: 0
+    amount: 0,            // الإجمالي النهائي (Amount بعد الخصومات)
+    discount: 0,          // مجموع الخصومات (للمراجعة فقط)
+    beforeDiscount: 0,    // Amount + Discount (قبل الخصم)
+    netColRaw: 0          // مجموع عمود «صافي السعر» (للمراجعة فقط)
   };
 
   dataRows.forEach(r => {
@@ -568,13 +517,11 @@ function buildInvoices(rows) {
         voucher: field(r, 'Voucher') || '-',
         items: [],
         totalAmount: 0,
-        totalDiscount: 0,
-        totalNet: 0
+        totalDiscount: 0
       });
     }
     const inv = map.get(key);
-    const n = rowNumbers(r, mode);
-    const afterDiscount = round2(n.amount - n.discount);
+    const n = rowNumbers(r);
 
     inv.items.push({
       item: field(r, 'Item') || '-',
@@ -587,20 +534,17 @@ function buildInvoices(rows) {
       amount: n.amount,
       discount: n.discount,
       discountPct: n.discountPct,
-      net: n.net,
+      netPrice: n.netPrice,
       package: field(r, 'العبوة') || '-',
       itemGroup: field(r, 'Item group') || '-'
     });
     inv.totalAmount += n.amount;
     inv.totalDiscount += n.discount;
-    inv.totalNet += n.net;
 
     diag.amount += n.amount;
     diag.discount += n.discount;
-    diag.net += n.net;
-    if (n.netCol !== null) diag.netColRaw += n.netCol;
-    diag.qtyTimesNet += n.netCol !== null ? n.qty * n.netCol : afterDiscount;
-    diag.amountMinusDiscount += afterDiscount;
+    diag.beforeDiscount += n.amount + n.discount;
+    if (n.netPrice !== null) diag.netColRaw += n.netPrice;
   });
 
   Object.keys(diag).forEach(k => {
@@ -637,24 +581,12 @@ async function loadInvoices() {
   }
 }
 
-const NET_MODE_LABELS = {
-  auto: 'تلقائي (اكتشاف من البيانات)',
-  netColumn: 'قيمة عمود «صافي السعر» كما هي',
-  qtyTimesNet: 'الكمية × «صافي السعر»',
-  amountMinusDiscount: 'المبلغ − الخصم',
-  amountMinusPercent: 'المبلغ − (المبلغ × نسبة الخصم)'
-};
-
 function updateStats() {
   document.getElementById('statInvoices').textContent = invoices.length;
   const itemCount = invoices.reduce((s, i) => s + i.items.length, 0);
   document.getElementById('statItems').textContent = itemCount;
-  const gross = round2(invoices.reduce((s, i) => s + i.totalAmount, 0));
-  const discount = round2(invoices.reduce((s, i) => s + i.totalDiscount, 0));
-  const net = round2(invoices.reduce((s, i) => s + i.totalNet, 0));
-  document.getElementById('statGross').textContent = fmt(gross);
-  document.getElementById('statDiscount').textContent = fmt(discount);
-  document.getElementById('statTotal').textContent = fmt(net);
+  const total = round2(invoices.reduce((s, i) => s + i.totalAmount, 0));
+  document.getElementById('statTotal').textContent = fmt(total);
 }
 
 /* ============ إعدادات الطباعة ============ */
@@ -705,20 +637,18 @@ function renderDiag() {
       <h2>🔍 مراجعة الإجماليات</h2>
       <div class="hint" style="margin:0 0 14px">
         الصفوف في الشيت: <b>${d.totalRows}</b> — صفوف بيانات مستخدمة: <b>${d.dataRows}</b> — صفوف متجاهلة (رؤوس/إجماليات/فارغة): <b>${d.skipped}</b><br>
-        الطريقة المستخدمة في حساب الصافي: <b>${NET_MODE_LABELS[d.mode] || d.mode}</b>
+        <b>Amount</b> هو الإجمالي النهائي بعد الخصومات، و<b>صافي السعر</b> يُعرض للمراجعة فقط.
       </div>
       <table class="items" style="margin-top:0">
-        <thead><tr><th>طريقة الحساب</th><th>الإجمالي</th></tr></thead>
+        <thead><tr><th>البند</th><th>الإجمالي</th></tr></thead>
         <tbody>
-          <tr><td>مجموع Amount (المبلغ قبل الخصم)</td><td>${fmt(d.amount)}</td></tr>
-          <tr><td>مجموع Discount (الخصم)</td><td>${fmt(d.discount)}</td></tr>
-          <tr><td>مجموع Amount − Discount</td><td>${fmt(d.amountMinusDiscount)}</td></tr>
-          <tr><td>مجموع عمود «صافي السعر» كما هو</td><td>${fmt(d.netColRaw)}</td></tr>
-          <tr><td>مجموع Quantity × «صافي السعر»</td><td>${fmt(d.qtyTimesNet)}</td></tr>
-          <tr><td><b>الصافي المستخدم حاليًا</b></td><td><b>${fmt(d.net)}</b></td></tr>
+          <tr><td><b>الإجمالي النهائي (مجموع Amount)</b></td><td><b>${fmt(d.amount)}</b></td></tr>
+          <tr><td>مجموع الخصم (Discount) — للمراجعة</td><td>${fmt(d.discount)}</td></tr>
+          <tr><td>الإجمالي قبل الخصم (Amount + Discount)</td><td>${fmt(d.beforeDiscount)}</td></tr>
+          <tr><td>مجموع عمود «صافي السعر» — للمراجعة</td><td>${fmt(d.netColRaw)}</td></tr>
         </tbody>
       </table>
-      <div class="hint">قارن الرقم المطابق لإجمالي الشيت واختر نفس الطريقة من الإعدادات. إذا لم يطابق أي رقم، فقد توجد صفوف إجماليات إضافية أو خلايا غير رقمية أو تبويب مختلف.</div>
+      <div class="hint">الإجمالي المستخدم في الفواتير هو مجموع <b>Amount</b> فقط، ولا يتم خصم Discount مرة أخرى لأنه مشمول بالفعل.</div>
     </div>`;
 }
 
@@ -746,7 +676,7 @@ function renderInvoices() {
   list.sort((a, b) => {
     if (sort === 'dateDesc') return parseDate(b.date) - parseDate(a.date);
     if (sort === 'dateAsc') return parseDate(a.date) - parseDate(b.date);
-    return b.totalNet - a.totalNet;
+    return b.totalAmount - a.totalAmount;
   });
 
   if (!list.length) {
@@ -793,15 +723,13 @@ function renderInvoices() {
                 <td>${fmt(it.amount)}</td>
                 <td>${it.discount ? fmt(it.discount) : '-'}</td>
                 <td>${it.discountPct ? fmt(it.discountPct) + '%' : '-'}</td>
-                <td><b>${fmt(it.net)}</b></td>
+                <td><b>${it.netPrice !== null ? fmt(it.netPrice) : '-'}</b></td>
               </tr>`).join('')}
           </tbody>
         </table>
         </div>
         <div class="inv-total">
-          <div class="total-badge">إجمالي المبالغ: <b>${fmt(inv.totalAmount)}</b></div>
-          <div class="total-badge">إجمالي الخصم: <b>${fmt(inv.totalDiscount)}</b></div>
-          <div class="total-badge grand">الصافي: <b>${fmt(inv.totalNet)}</b></div>
+          <div class="total-badge grand">الإجمالي: <b>${fmt(inv.totalAmount)}</b></div>
         </div>
       </div>
     </div>`).join('');
@@ -814,9 +742,7 @@ function esc(s) {
 /* ============ التهيئة ============ */
 window.addEventListener('DOMContentLoaded', () => {
   const saved = localStorage.getItem('sheetUrl');
-  const savedMode = localStorage.getItem('netMode');
   const savedPrint = localStorage.getItem('printOrientation') || 'portrait';
-  if (savedMode) document.getElementById('netMode').value = savedMode;
   const printSelect = document.getElementById('printOrientation');
   if (printSelect) {
     printSelect.value = savedPrint;
