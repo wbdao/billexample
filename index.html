@@ -205,7 +205,7 @@
         3. إذا كان رابط الشيت ينتهي بـ <b>#gid=...</b> فسيتم قراءة نفس التبويب تلقائيًا.
       </div>
       <div class="hint">
-        💡 <b>Amount</b> هو إجمالي السطر النهائي بعد الخصومات، وعمود <b>صافي السعر</b> يُعرض للمراجعة فقط ولا يُخصم مرة أخرى. عمود <b>Discount</b> = مبلغ الخصم، وعمود <b>Discount percent</b> = نسبة الخصم (15 تعني 15%). إذا كان الإجمالي مختلفًا، اضغط «🔍 مراجعة الإجماليات» في صفحة الفواتير.
+        💡 <b>Amount</b> هو إجمالي السطر النهائي بعد الخصومات، و<b>صافي السعر</b> يُحسب تلقائيًا = <b>Amount ÷ الكمية</b> (سعر الوحدة بعد الخصم). عمود <b>Discount</b> = مبلغ الخصم، وعمود <b>Discount percent</b> = نسبة الخصم (15 تعني 15%). إذا كان الإجمالي مختلفًا، اضغط «🔍 مراجعة الإجماليات» في صفحة الفواتير.
       </div>
       <div style="margin-top:18px; display:flex; gap:10px; flex-wrap:wrap">
         <button class="btn" id="testBtn" onclick="testConnection()">🔌 اختبار الاتصال</button>
@@ -469,26 +469,15 @@ function isDataRow(r) {
   return true;
 }
 
-/* قراءة قيمة رقمية اختيارية: ترجع null إذا كانت الخلية فارغة أو رمزًا غير رقمي مثل "-" أو "#N/A" */
-function parseNumOrNull(raw) {
-  const s = String(raw === null || raw === undefined ? '' : raw).trim();
-  if (!s) return null;
-  const latin = toLatinDigits(s);
-  // لا يوجد أي رقم في الخلية (مثل "-" أو "—" أو "#N/A")
-  if (!/[0-9]/.test(latin)) return null;
-  // أخطاء الشيت مثل #DIV/0! أو #REF!
-  if (s.includes('#')) return null;
-  return round2(parseNum(s));
-}
-
-/* أرقام السطر: Amount هو الإجمالي النهائي بعد الخصومات، و«صافي السعر» للعرض فقط */
+/* أرقام السطر: Amount هو الإجمالي النهائي بعد الخصومات، وصافي السعر = Amount ÷ الكمية */
 function rowNumbers(r) {
   const qty = parseNum(field(r, 'Quantity'));
   const unitPrice = parseNum(field(r, 'Unit price'));
   const amountRaw = field(r, 'Amount');
   const amount = round2(amountRaw === '' ? qty * unitPrice : parseNum(amountRaw));
   const disc = discountOf(r);
-  const netPrice = parseNumOrNull(field(r, 'صافي السعر', 'الصافي'));
+  // صافي السعر (للوحدة) = الإجمالي النهائي بعد الخصم ÷ الكمية
+  const netPrice = qty !== 0 ? round2(amount / qty) : null;
   return {
     qty,
     unitPrice,
@@ -508,8 +497,7 @@ function buildInvoices(rows) {
     skipped: rows.length - dataRows.length,
     amount: 0,            // الإجمالي النهائي (Amount بعد الخصومات)
     discount: 0,          // مجموع الخصومات (للمراجعة فقط)
-    beforeDiscount: 0,    // Amount + Discount (قبل الخصم)
-    netColRaw: 0          // مجموع عمود «صافي السعر» (للمراجعة فقط)
+    beforeDiscount: 0     // Amount + Discount (قبل الخصم)
   };
 
   dataRows.forEach(r => {
@@ -553,7 +541,6 @@ function buildInvoices(rows) {
     diag.amount += n.amount;
     diag.discount += n.discount;
     diag.beforeDiscount += n.amount + n.discount;
-    if (n.netPrice !== null) diag.netColRaw += n.netPrice;
   });
 
   Object.keys(diag).forEach(k => {
@@ -646,7 +633,7 @@ function renderDiag() {
       <h2>🔍 مراجعة الإجماليات</h2>
       <div class="hint" style="margin:0 0 14px">
         الصفوف في الشيت: <b>${d.totalRows}</b> — صفوف بيانات مستخدمة: <b>${d.dataRows}</b> — صفوف متجاهلة (رؤوس/إجماليات/فارغة): <b>${d.skipped}</b><br>
-        <b>Amount</b> هو الإجمالي النهائي بعد الخصومات، و<b>صافي السعر</b> يُعرض للمراجعة فقط.
+        <b>Amount</b> هو الإجمالي النهائي بعد الخصومات، و<b>صافي السعر</b> = <b>Amount ÷ الكمية</b>.
       </div>
       <table class="items" style="margin-top:0">
         <thead><tr><th>البند</th><th>الإجمالي</th></tr></thead>
@@ -654,10 +641,10 @@ function renderDiag() {
           <tr><td><b>الإجمالي النهائي (مجموع Amount)</b></td><td><b>${fmt(d.amount)}</b></td></tr>
           <tr><td>مجموع الخصم (Discount) — للمراجعة</td><td>${fmt(d.discount)}</td></tr>
           <tr><td>الإجمالي قبل الخصم (Amount + Discount)</td><td>${fmt(d.beforeDiscount)}</td></tr>
-          <tr><td>مجموع عمود «صافي السعر» — للمراجعة</td><td>${fmt(d.netColRaw)}</td></tr>
         </tbody>
       </table>
-      <div class="hint">الإجمالي المستخدم في الفواتير هو مجموع <b>Amount</b> فقط، ولا يتم خصم Discount مرة أخرى لأنه مشمول بالفعل.</div>
+      <div class="hint">الإجمالي المستخدم في الفواتير هو مجموع <b>Amount</b> فقط، ولا يتم خصم Discount مرة أخرى لأنه مشمول بالفعل.<br>
+        <b>صافي السعر</b> في جدول الأصناف يُحسب تلقائيًا = <b>Amount ÷ الكمية</b>.</div>
     </div>`;
 }
 
