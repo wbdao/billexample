@@ -681,6 +681,15 @@ function renderDiag() {
     </div>`;
 }
 
+/* دمج المقاس واللون مع اسم الصنف */
+function itemLabel(it) {
+  const attrs = [it.size, it.color].filter(v => v && v !== '-');
+  const suffix = attrs.length
+    ? `<span style="color:var(--muted);font-size:12.5px"> — ${esc(attrs.join(' / '))}</span>`
+    : '';
+  return `<b>${esc(it.name)}</b>${suffix}`;
+}
+
 function renderInvoices() {
   const area = document.getElementById('invoicesArea');
   const q = (document.getElementById('searchBox').value || '').trim().toLowerCase();
@@ -689,7 +698,7 @@ function renderInvoices() {
   let list = invoices.filter(inv => {
     if (!q) return true;
     const hay = [inv.invoice, inv.salesOrder, inv.customer, inv.deliveryName,
-      ...inv.items.map(i => i.item + ' ' + i.name)].join(' ').toLowerCase();
+      ...inv.items.map(i => [i.item, i.name, i.size, i.color].join(' '))].join(' ').toLowerCase();
     return hay.includes(q);
   });
 
@@ -725,7 +734,7 @@ function renderInvoices() {
         <table class="items">
           <thead>
             <tr>
-              <th>#</th><th>الصنف</th><th>الاسم</th><th>المقاس</th><th>اللون</th>
+              <th>#</th><th>الصنف</th><th>الاسم / المقاس / اللون</th>
               <th>العبوة</th><th>الوحدة</th><th>الكمية</th><th>سعر الوحدة</th>
               <th>المبلغ</th><th>الخصم</th><th>خصم النسبة</th><th>صافي السعر</th>
             </tr>
@@ -735,9 +744,7 @@ function renderInvoices() {
               <tr>
                 <td>${i + 1}</td>
                 <td>${esc(it.item)}</td>
-                <td style="text-align:right">${esc(it.name)}</td>
-                <td>${esc(it.size)}</td>
-                <td>${esc(it.color)}</td>
+                <td style="text-align:right">${itemLabel(it)}</td>
                 <td>${esc(it.package)}</td>
                 <td>${esc(it.unit)}</td>
                 <td>${fmt(it.qty)}</td>
