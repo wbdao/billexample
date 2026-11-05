@@ -82,6 +82,8 @@
   .invoice.open .inv-toggle::before { content:"▲ "; }
   .invoice:not(.open) .inv-toggle::before { content:"▼ "; }
 
+  .table-wrap { overflow-x:auto; margin-top:14px; }
+  .table-wrap table.items { min-width:920px; margin-top:0; }
   table.items { width:100%; border-collapse:collapse; margin-top:14px; font-size:14px; }
   table.items th {
     background:var(--primary); color:#fff; padding:10px 8px; text-align:center;
@@ -113,6 +115,8 @@
     header, .toolbar, .stats, .inv-toggle { display:none !important; }
     .invoice { box-shadow:none; border:1px solid #ccc; page-break-inside:avoid; }
     .inv-body { display:block !important; }
+    .table-wrap { overflow:visible; }
+    .table-wrap table.items { min-width:0; }
     body { background:#fff; }
   }
   @media (max-width:640px) {
@@ -187,7 +191,7 @@
         <option value="amountMinusDiscount">المبلغ − الخصم</option>
         <option value="amountMinusPercent">المبلغ − (المبلغ × نسبة الخصم)</option>
       </select>
-      <div class="hint">💡 إذا كان الإجمالي ما زال مختلفًا، اضغط «🔍 مراجعة الإجماليات» وقارن مجموع كل طريقة مع إجمالي الشيت.</div>
+      <div class="hint">💡 عمود <b>Discount</b> = مبلغ الخصم، وعمود <b>Discount percent</b> = نسبة الخصم (15 تعني 15%). إذا كان الإجمالي مختلفًا، اضغط «🔍 مراجعة الإجماليات» وقارن مجموع كل طريقة مع إجمالي الشيت.</div>
       <div style="margin-top:18px; display:flex; gap:10px; flex-wrap:wrap">
         <button class="btn" id="testBtn" onclick="testConnection()">🔌 اختبار الاتصال</button>
         <button class="btn secondary" id="saveBtn" onclick="saveSettings()">💾 حفظ</button>
@@ -432,6 +436,15 @@ function readNetMode() {
   return localStorage.getItem('netMode') || 'auto';
 }
 
+/* الخصم: Discount = مبلغ الخصم، Discount percent = نسبة مئوية (15 = 15%) */
+function discountOf(amount, row) {
+  const pct = round2(parseNum(field(row, 'Discount percent', 'Discount %', 'نسبة الخصم')));
+  const explicit = parseNum(field(row, 'Discount'));
+  // إذا لم يُكتب مبلغ الخصم وكانت النسبة موجودة، نحسب المبلغ من النسبة
+  const value = explicit !== 0 ? round2(explicit) : round2(amount * pct / 100);
+  return { pct, value };
+}
+
 /* استبعاد صفوف الرؤوس المكررة وصفوف الإجماليات والصفوف الفارغة */
 function isDataRow(r) {
   const invoice = field(r, 'Invoice');
@@ -460,7 +473,7 @@ function detectNetMode(rows) {
     const net = parseNum(netRaw);
     const amountRaw = field(r, 'Amount');
     const amount = amountRaw === '' ? qty * parseNum(field(r, 'Unit price')) : parseNum(amountRaw);
-    const lineNet = amount - parseNum(field(r, 'Discount'));
+    const lineNet = amount - discountOf(amount, r).value;
     if (!net || !lineNet) return;
     // نقارن القيمة بأقرب تفسير: سعر وحدة أم إجمالي سطر
     const dPerUnit = Math.abs(net - lineNet / qty);
@@ -479,8 +492,9 @@ function rowNumbers(r, netMode) {
   const unitPrice = parseNum(field(r, 'Unit price'));
   const amountRaw = field(r, 'Amount');
   const amount = round2(amountRaw === '' ? qty * unitPrice : parseNum(amountRaw));
-  const discount = round2(parseNum(field(r, 'Discount')));
-  const discountPct = parseNum(field(r, 'Discount percent', 'Discount %', 'نسبة الخصم'));
+  const disc = discountOf(amount, r);
+  const discount = disc.value;
+  const discountPct = disc.pct;
   const netRaw = field(r, 'صافي السعر', 'الصافي');
   const netCol = netRaw === '' ? null : round2(parseNum(netRaw));
   const afterDiscount = round2(amount - discount);
@@ -549,6 +563,7 @@ function buildInvoices(rows) {
       unitPrice: n.unitPrice,
       amount: n.amount,
       discount: n.discount,
+      discountPct: n.discountPct,
       net: n.net,
       package: field(r, 'العبوة') || '-',
       itemGroup: field(r, 'Item group') || '-'
@@ -706,12 +721,13 @@ function renderInvoices() {
         </div>
       </div>
       <div class="inv-body">
+        <div class="table-wrap">
         <table class="items">
           <thead>
             <tr>
               <th>#</th><th>الصنف</th><th>الاسم</th><th>المقاس</th><th>اللون</th>
               <th>العبوة</th><th>الوحدة</th><th>الكمية</th><th>سعر الوحدة</th>
-              <th>المبلغ</th><th>الخصم</th><th>صافي السعر</th>
+              <th>المبلغ</th><th>الخصم</th><th>خصم النسبة</th><th>صافي السعر</th>
             </tr>
           </thead>
           <tbody>
@@ -728,10 +744,12 @@ function renderInvoices() {
                 <td>${fmt(it.unitPrice)}</td>
                 <td>${fmt(it.amount)}</td>
                 <td>${it.discount ? fmt(it.discount) : '-'}</td>
+                <td>${it.discountPct ? fmt(it.discountPct) + '%' : '-'}</td>
                 <td><b>${fmt(it.net)}</b></td>
               </tr>`).join('')}
           </tbody>
         </table>
+        </div>
         <div class="inv-total">
           <div class="total-badge">إجمالي المبالغ: <b>${fmt(inv.totalAmount)}</b></div>
           <div class="total-badge">إجمالي الخصم: <b>${fmt(inv.totalDiscount)}</b></div>
