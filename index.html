@@ -445,12 +445,10 @@ function parseCSV(text) {
 /* ============ تجميع الفواتير ============ */
 let diagnostics = null;
 
-/* الخصم: Discount = مبلغ الخصم، Discount percent = نسبة مئوية (15 = 15%) */
-function discountOf(amount, row) {
+/* الخصم: Discount = مبلغ الخصم كما هو، Discount percent = نسبة مئوية (15 = 15%) — بدون أي اشتقاق */
+function discountOf(row) {
   const pct = round2(parseNum(field(row, 'Discount percent', 'Discount %', 'نسبة الخصم')));
-  const explicit = parseNum(field(row, 'Discount'));
-  // إذا لم يُكتب مبلغ الخصم وكانت النسبة موجودة، نحسب المبلغ من النسبة
-  const value = explicit !== 0 ? round2(explicit) : round2(amount * pct / 100);
+  const value = round2(parseNum(field(row, 'Discount')));
   return { pct, value };
 }
 
@@ -477,7 +475,7 @@ function rowNumbers(r) {
   const unitPrice = parseNum(field(r, 'Unit price'));
   const amountRaw = field(r, 'Amount');
   const amount = round2(amountRaw === '' ? qty * unitPrice : parseNum(amountRaw));
-  const disc = discountOf(amount, r);
+  const disc = discountOf(r);
   const netRaw = field(r, 'صافي السعر', 'الصافي');
   const netPrice = netRaw === '' ? null : round2(parseNum(netRaw));
   return {
