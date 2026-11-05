@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>نظام الفواتير</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI', Tahoma, Arial, sans-serif; }
+  :root {
+    --primary:#1a5fb4; --primary-dark:#124a94; --bg:#f0f4f8;
+    --card:#fff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b;
+    --success:#16a34a; --danger:#dc2626;
+  }
+  body { background:var(--bg); color:var(--text); min-height:100vh; }
+
+  /* ===== Header ===== */
+  header {
+    background:linear-gradient(135deg, var(--primary), var(--primary-dark));
+    color:#fff; padding:0 24px; display:flex; align-items:center;
+    justify-content:space-between; height:64px; box-shadow:0 2px 8px rgba(0,0,0,.15);
+    position:sticky; top:0; z-index:100;
+  }
+  header h1 { font-size:20px; display:flex; align-items:center; gap:10px; }
+  nav { display:flex; gap:8px; }
+  nav button {
+    background:rgba(255,255,255,.12); color:#fff; border:none; padding:10px 22px;
+    border-radius:8px; cursor:pointer; font-size:15px; transition:.2s;
+  }
+  nav button:hover { background:rgba(255,255,255,.25); }
+  nav button.active { background:#fff; color:var(--primary); font-weight:700; }
+
+  .container { max-width:1200px; margin:24px auto; padding:0 16px; }
+  .page { display:none; }
+  .page.active { display:block; animation:fadeIn .3s; }
+  @keyframes fadeIn { from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:none} }
+
+  /* ===== Cards / Buttons ===== */
+  .card { background:var(--card); border-radius:12px; padding:24px; box-shadow:0 1px 4px rgba(0,0,0,.08); margin-bottom:20px; }
+  .card h2 { font-size:18px; margin-bottom:16px; color:var(--primary-dark); border-bottom:2px solid var(--border); padding-bottom:10px; }
+  label { display:block; font-weight:600; margin-bottom:6px; font-size:14px; }
+  input[type=text], input[type=url] {
+    width:100%; padding:12px 14px; border:1.5px solid var(--border); border-radius:8px;
+    font-size:15px; transition:.2s;
+  }
+  input:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 3px rgba(26,95,180,.12); }
+  .btn {
+    background:var(--primary); color:#fff; border:none; padding:12px 28px;
+    border-radius:8px; font-size:15px; cursor:pointer; transition:.2s; font-weight:600;
+  }
+  .btn:hover { background:var(--primary-dark); }
+  .btn.secondary { background:#64748b; }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .hint { font-size:13px; color:var(--muted); margin-top:10px; line-height:1.7; }
+  .status { margin-top:14px; padding:12px 16px; border-radius:8px; font-size:14px; display:none; }
+  .status.ok { display:block; background:#dcfce7; color:#166534; border:1px solid #86efac; }
+  .status.err { display:block; background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; }
+
+  /* ===== Toolbar ===== */
+  .toolbar { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:20px; }
+  .toolbar input { flex:1; min-width:220px; }
+  .toolbar select { padding:11px 14px; border:1.5px solid var(--border); border-radius:8px; font-size:14px; background:#fff; }
+  .stats { display:flex; gap:14px; flex-wrap:wrap; margin-bottom:20px; }
+  .stat {
+    flex:1; min-width:150px; background:var(--card); border-radius:12px; padding:18px;
+    box-shadow:0 1px 4px rgba(0,0,0,.08); text-align:center;
+  }
+  .stat .num { font-size:26px; font-weight:800; color:var(--primary); }
+  .stat .lbl { font-size:13px; color:var(--muted); margin-top:4px; }
+
+  /* ===== Invoice ===== */
+  .invoice {
+    background:var(--card); border-radius:12px; box-shadow:0 1px 5px rgba(0,0,0,.1);
+    margin-bottom:22px; overflow:hidden;
+  }
+  .inv-head {
+    background:linear-gradient(135deg,#f8fafc,#eef2f7); padding:18px 24px;
+    display:flex; justify-content:space-between; flex-wrap:wrap; gap:12px;
+    border-bottom:2px solid var(--border); cursor:pointer;
+  }
+  .inv-head .inv-title { font-size:17px; font-weight:800; color:var(--primary-dark); }
+  .inv-head .inv-meta { display:flex; gap:22px; flex-wrap:wrap; font-size:13.5px; color:var(--muted); }
+  .inv-head .inv-meta b { color:var(--text); }
+  .inv-toggle { font-size:12px; color:var(--muted); margin-top:6px; }
+  .inv-body { display:none; padding:0 24px 20px; }
+  .invoice.open .inv-body { display:block; }
+  .invoice.open .inv-toggle::before { content:"▲ "; }
+  .invoice:not(.open) .inv-toggle::before { content:"▼ "; }
+
+  table.items { width:100%; border-collapse:collapse; margin-top:14px; font-size:14px; }
+  table.items th {
+    background:var(--primary); color:#fff; padding:10px 8px; text-align:center;
+    font-size:13px; white-space:nowrap;
+  }
+  table.items td { padding:9px 8px; text-align:center; border-bottom:1px solid var(--border); }
+  table.items tr:nth-child(even) td { background:#f8fafc; }
+  table.items tr:hover td { background:#eff6ff; }
+  .inv-total {
+    margin-top:14px; display:flex; justify-content:flex-start; gap:10px; flex-wrap:wrap;
+  }
+  .total-badge {
+    background:#eef2f7; border:1px solid var(--border); border-radius:8px;
+    padding:10px 18px; font-size:14px;
+  }
+  .total-badge b { color:var(--primary-dark); font-size:16px; }
+  .total-badge.grand { background:var(--primary); border-color:var(--primary); color:#fff; }
+  .total-badge.grand b { color:#fff; }
+
+  .loader { text-align:center; padding:60px; color:var(--muted); font-size:16px; }
+  .spinner {
+    width:40px; height:40px; border:4px solid var(--border); border-top-color:var(--primary);
+    border-radius:50%; margin:0 auto 16px; animation:spin .8s linear infinite;
+  }
+  @keyframes spin { to{transform:rotate(360deg)} }
+  .empty { text-align:center; padding:60px; color:var(--muted); }
+  .no-conn { text-align:center; padding:50px; }
+  .no-conn .icon { font-size:50px; margin-bottom:14px; }
+
+  @media print {
+    header, .toolbar, .stats, .inv-toggle { display:none !important; }
+    .invoice { box-shadow:none; border:1px solid #ccc; page-break-inside:avoid; }
+    .inv-body { display:block !important; }
+    body { background:#fff; }
+  }
+  @media (max-width:640px) {
+    table.items { font-size:12px; }
+    table.items th, table.items td { padding:6px 4px; }
+    .inv-head { flex-direction:column; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📄 نظام الفواتير</h1>
+  <nav>
+    <button id="navInvoices" class="active" onclick="showPage('invoices')">الفواتير</button>
+    <button id="navSettings" onclick="showPage('settings')">⚙️ الإعدادات</button>
+  </nav>
+</header>
+
+<div class="container">
+
+  <!-- ================= صفحة الفواتير ================= -->
+  <div id="page-invoices" class="page active">
+    <div class="stats" id="statsBar" style="display:none">
+      <div class="stat"><div class="num" id="statInvoices">0</div><div class="lbl">عدد الفواتير</div></div>
+      <div class="stat"><div class="num" id="statItems">0</div><div class="lbl">عدد الأصناف</div></div>
+      <div class="stat"><div class="num" id="statTotal">0</div><div class="lbl">إجمالي المبيعات</div></div>
+    </div>
+
+    <div class="toolbar" id="toolbar" style="display:none">
+      <input type="text" id="searchBox" placeholder="🔍 بحث برقم الفاتورة / العميل / الصنف..." oninput="renderInvoices()">
+      <select id="sortSelect" onchange="renderInvoices()">
+        <option value="dateDesc">الأحدث أولاً</option>
+        <option value="dateAsc">الأقدم أولاً</option>
+        <option value="amountDesc">الأعلى قيمة أولاً</option>
+      </select>
+      <button class="btn secondary" onclick="loadInvoices()">🔄 تحديث</button>
+      <button class="btn secondary" onclick="window.print()">🖨️ طباعة</button>
+    </div>
+
+    <div id="invoicesArea">
+      <div class="no-conn">
+        <div class="icon">🔗</div>
+        <p style="margin-bottom:16px">لم يتم ربط جوجل شيت بعد</p>
+        <button class="btn" onclick="showPage('settings')">الذهاب إلى الإعدادات</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= صفحة الإعدادات ================= -->
+  <div id="page-settings" class="page">
+    <div class="card">
+      <h2>⚙️ إعدادات الاتصال بجوجل شيت</h2>
+      <label>رابط جوجل شيت (Google Sheets URL)</label>
+      <input type="url" id="sheetUrl" placeholder="https://docs.google.com/spreadsheets/d/.../edit">
+      <div class="hint">
+        ⚠️ ملاحظات مهمة:<br>
+        1. تأكد أن الشيت منشور بصلاحية: <b>أي شخص لديه الرابط يمكنه العرض</b> (Share → Anyone with the link → Viewer).<br>
+        2. الصف الأول يجب أن يحتوي على أسماء الأعمدة كما هي: Sales order, Customer account, Delivery name, Warehouse, Group, Date, Invoice, Voucher, Item, Name, Size, Color, Unit price, Quantity, Amount, Unit, Discount, Discount percent, Item group, العبوة, صافي السعر.
+      </div>
+      <div style="margin-top:18px; display:flex; gap:10px; flex-wrap:wrap">
+        <button class="btn" id="testBtn" onclick="testConnection()">🔌 اختبار الاتصال</button>
+        <button class="btn secondary" id="saveBtn" onclick="saveSettings()">💾 حفظ</button>
+      </div>
+      <div class="status" id="statusBox"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ============ الحالة العامة ============ */
+let allRows = [];        // كل صفوف الشيت
+let invoices = [];       // الفواتير المجمعة
+
+/* ============ التنقل بين الصفحات ============ */
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  document.getElementById('nav' + name.charAt(0).toUpperCase() + name.slice(1)).classList.add('active');
+  if (name === 'invoices') loadInvoices();
+}
+
+/* ============ استخراج معرّف الشيت من الرابط ============ */
+function extractSheetId(url) {
+  const m = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  return m ? m[1] : null;
+}
+
+/* ============ الإعدادات ============ */
+function saveSettings() {
+  const url = document.getElementById('sheetUrl').value.trim();
+  if (!extractSheetId(url)) {
+    showStatus('❌ الرابط غير صحيح. تأكد من لصق رابط جوجل شيت كامل.', false);
+    return;
+  }
+  localStorage.setItem('sheetUrl', url);
+  showStatus('✅ تم حفظ الإعدادات بنجاح.', true);
+  loadInvoices();
+}
+
+function showStatus(msg, ok) {
+  const box = document.getElementById('statusBox');
+  box.textContent = msg;
+  box.className = 'status ' + (ok ? 'ok' : 'err');
+}
+
+async function testConnection() {
+  const url = document.getElementById('sheetUrl').value.trim();
+  const id = extractSheetId(url);
+  if (!id) { showStatus('❌ أدخل رابط جوجل شيت صحيح أولاً.', false); return; }
+  document.getElementById('testBtn').disabled = true;
+  showStatus('⏳ جارٍ الاتصال...');
+  try {
+    const rows = await fetchSheet(id);
+    if (!rows.length) throw new Error('الشيت فارغ');
+    showStatus(`✅ الاتصال ناجح! تم العثور على ${rows.length} صف بيانات.`, true);
+  } catch (e) {
+    showStatus('❌ فشل الاتصال: ' + e.message + ' — تأكد من صلاحية المشاركة (Anyone with the link).', false);
+  }
+  document.getElementById('testBtn').disabled = false;
+}
+
+/* ============ جلب البيانات من جوجل شيت ============ */
+async function fetchSheet(sheetId) {
+  const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`;
+  const res = await fetch(csvUrl);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const text = await res.text();
+  return parseCSV(text);
+}
+
+/* ============ محلل CSV يدعم علامات الاقتباس ============ */
+function parseCSV(text) {
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i+1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else field += c;
+    } else {
+      if (c === '"') inQuotes = true;
+      else if (c === ',') { row.push(field); field = ''; }
+      else if (c === '\n' || c === '\r') {
+        if (c === '\r' && text[i+1] === '\n') i++;
+        row.push(field); field = '';
+        if (row.some(f => f.trim() !== '')) rows.push(row);
+        row = [];
+      } else field += c;
+    }
+  }
+  if (field !== '' || row.length) { row.push(field); if (row.some(f => f.trim() !== '')) rows.push(row); }
+  if (!rows.length) return [];
+  const headers = rows[0].map(h => h.trim());
+  return rows.slice(1).map(r => {
+    const obj = {};
+    headers.forEach((h, i) => obj[h] = (r[i] || '').trim());
+    return obj;
+  });
+}
+
+/* ============ تجميع الفواتير ============ */
+function buildInvoices(rows) {
+  const map = new Map();
+  rows.forEach(r => {
+    const key = r['Invoice'] || r['Sales order'] || 'بدون رقم';
+    if (!map.has(key)) {
+      map.set(key, {
+        invoice: key,
+        salesOrder: r['Sales order'] || '-',
+        customer: r['Customer account'] || '-',
+        deliveryName: r['Delivery name'] || '-',
+        warehouse: r['Warehouse'] || '-',
+        group: r['Group'] || '-',
+        date: r['Date'] || '',
+        voucher: r['Voucher'] || '-',
+        items: [],
+        totalAmount: 0,
+        totalDiscount: 0,
+        totalNet: 0
+      });
+    }
+    const inv = map.get(key);
+    const qty = parseFloat(r['Quantity']) || 0;
+    const unitPrice = parseFloat(r['Unit price']) || 0;
+    const amount = parseFloat(r['Amount']) || (qty * unitPrice);
+    const discount = parseFloat(r['Discount']) || 0;
+    const net = parseFloat(r['صافي السعر']) || (amount - discount);
+    inv.items.push({
+      item: r['Item'] || '-',
+      name: r['Name'] || '-',
+      size: r['Size'] || '-',
+      color: r['Color'] || '-',
+      unit: r['Unit'] || '-',
+      qty: qty,
+      unitPrice: unitPrice,
+      amount: amount,
+      discount: discount,
+      net: net,
+      package: r['العبوة'] || '-',
+      itemGroup: r['Item group'] || '-'
+    });
+    inv.totalAmount += amount;
+    inv.totalDiscount += discount;
+    inv.totalNet += net;
+  });
+  return [...map.values()];
+}
+
+/* ============ تحميل وعرض الفواتير ============ */
+async function loadInvoices() {
+  const url = localStorage.getItem('sheetUrl');
+  const area = document.getElementById('invoicesArea');
+  if (!url) return;
+  const id = extractSheetId(url);
+  if (!id) return;
+
+  area.innerHTML = '<div class="loader"><div class="spinner"></div>جارٍ تحميل الفواتير...</div>';
+  document.getElementById('statsBar').style.display = 'none';
+  document.getElementById('toolbar').style.display = 'none';
+
+  try {
+    allRows = await fetchSheet(id);
+    if (!allRows.length) throw new Error('الشيت لا يحتوي على بيانات');
+    invoices = buildInvoices(allRows);
+    document.getElementById('statsBar').style.display = 'flex';
+    document.getElementById('toolbar').style.display = 'flex';
+    updateStats();
+    renderInvoices();
+  } catch (e) {
+    area.innerHTML = `<div class="no-conn"><div class="icon">⚠️</div>
+      <p style="margin-bottom:16px">تعذر تحميل البيانات: ${e.message}</p>
+      <button class="btn" onclick="loadInvoices()">إعادة المحاولة</button></div>`;
+  }
+}
+
+function updateStats() {
+  document.getElementById('statInvoices').textContent = invoices.length;
+  document.getElementById('statItems').textContent = allRows.length;
+  const total = invoices.reduce((s, i) => s + i.totalNet, 0);
+  document.getElementById('statTotal').textContent = fmt(total);
+}
+
+function fmt(n) {
+  return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+}
+
+function parseDate(s) {
+  if (!s) return new Date(0);
+  const d = new Date(s);
+  return isNaN(d) ? new Date(0) : d;
+}
+
+function renderInvoices() {
+  const area = document.getElementById('invoicesArea');
+  const q = (document.getElementById('searchBox').value || '').trim().toLowerCase();
+  const sort = document.getElementById('sortSelect').value;
+
+  let list = invoices.filter(inv => {
+    if (!q) return true;
+    const hay = [inv.invoice, inv.salesOrder, inv.customer, inv.deliveryName,
+      ...inv.items.map(i => i.item + ' ' + i.name)].join(' ').toLowerCase();
+    return hay.includes(q);
+  });
+
+  list.sort((a, b) => {
+    if (sort === 'dateDesc') return parseDate(b.date) - parseDate(a.date);
+    if (sort === 'dateAsc') return parseDate(a.date) - parseDate(b.date);
+    return b.totalNet - a.totalNet;
+  });
+
+  if (!list.length) {
+    area.innerHTML = '<div class="empty">لا توجد فواتير مطابقة</div>';
+    return;
+  }
+
+  area.innerHTML = list.map(inv => `
+    <div class="invoice open">
+      <div class="inv-head" onclick="this.parentElement.classList.toggle('open')">
+        <div>
+          <div class="inv-title">🧾 فاتورة رقم: ${esc(inv.invoice)}</div>
+          <div class="inv-toggle">عرض / إخفاء التفاصيل</div>
+        </div>
+        <div class="inv-meta">
+          <span>📅 التاريخ: <b>${esc(inv.date)}</b></span>
+          <span>👤 العميل: <b>${esc(inv.customer)}</b></span>
+          <span>🚚 التسليم: <b>${esc(inv.deliveryName)}</b></span>
+          <span>🏭 المستودع: <b>${esc(inv.warehouse)}</b></span>
+          <span>📦 المجموعة: <b>${esc(inv.group)}</b></span>
+          <span>🔢 أمر البيع: <b>${esc(inv.salesOrder)}</b></span>
+        </div>
+      </div>
+      <div class="inv-body">
+        <table class="items">
+          <thead>
+            <tr>
+              <th>#</th><th>الصنف</th><th>الاسم</th><th>المقاس</th><th>اللون</th>
+              <th>العبوة</th><th>الوحدة</th><th>الكمية</th><th>سعر الوحدة</th>
+              <th>المبلغ</th><th>الخصم</th><th>صافي السعر</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${inv.items.map((it, i) => `
+              <tr>
+                <td>${i + 1}</td>
+                <td>${esc(it.item)}</td>
+                <td style="text-align:right">${esc(it.name)}</td>
+                <td>${esc(it.size)}</td>
+                <td>${esc(it.color)}</td>
+                <td>${esc(it.package)}</td>
+                <td>${esc(it.unit)}</td>
+                <td>${fmt(it.qty)}</td>
+                <td>${fmt(it.unitPrice)}</td>
+                <td>${fmt(it.amount)}</td>
+                <td>${it.discount ? fmt(it.discount) : '-'}</td>
+                <td><b>${fmt(it.net)}</b></td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+        <div class="inv-total">
+          <div class="total-badge">إجمالي المبالغ: <b>${fmt(inv.totalAmount)}</b></div>
+          <div class="total-badge">إجمالي الخصم: <b>${fmt(inv.totalDiscount)}</b></div>
+          <div class="total-badge grand">الصافي: <b>${fmt(inv.totalNet)}</b></div>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* ============ التهيئة ============ */
+window.addEventListener('DOMContentLoaded', () => {
+  const saved = localStorage.getItem('sheetUrl');
+  if (saved) {
+    document.getElementById('sheetUrl').value = saved;
+    loadInvoices();
+  }
+});
+</script>
+</body>
+</html>
